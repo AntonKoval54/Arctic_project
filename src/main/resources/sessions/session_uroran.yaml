@@ -1,0 +1,7 @@
+---
+name: "uroran"
+host: "umt.imm.uran.ru"
+port: 22
+user: "s0116"
+pathToKey: "C:\\Users\\kreml\\IdeaProjects\\skgui\\src\\main\\resources\\keys\\key"
+passPhrase: "pp5sem"
