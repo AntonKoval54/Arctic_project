@@ -1,3 +1,7 @@
 venv
 .venv
 .idea
+/target/
+/out/
+/.idea/
+/src/main/resources/
