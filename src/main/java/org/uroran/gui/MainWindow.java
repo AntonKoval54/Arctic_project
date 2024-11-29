@@ -1,7 +1,9 @@
 package org.uroran.gui;
 
 import com.jcraft.jsch.JSchException;
+import org.uroran.models.SessionData;
 import org.uroran.service.SessionDataService;
+import org.uroran.service.SftpService;
 import org.uroran.service.SshService;
 
 import javax.swing.*;
@@ -21,12 +23,15 @@ public class MainWindow extends JFrame {
     private StyledDocument document;
 
     private final SshService sshService;
+    private final SftpService sftpService;
 
-    public MainWindow(SshService sshService) {
-        this.sshService = sshService;
+    public MainWindow(SessionData sessionData) {
+        this.sshService = new SshService(sessionData);
+        this.sftpService = new SftpService(sessionData);
 
         try {
             sshService.connect();
+            sftpService.connect();
             Thread.sleep(1000);
         } catch (IOException | JSchException | InterruptedException e) {
             throw new RuntimeException(e);
@@ -41,14 +46,17 @@ public class MainWindow extends JFrame {
             @Override
             public void windowClosing(WindowEvent e) {
                 sshService.disconnect();
+                sftpService.disconnect();
                 dispose();
-                System.exit(1);
+                System.exit(0);
             }
         });
 
         // Основной контейнер
         Container container = getContentPane();
         container.setLayout(new BorderLayout());
+
+        setJMenuBar(createMenuBar());
 
         // Основной разделитель (левая и правая часть)
         JSplitPane mainSplitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT);

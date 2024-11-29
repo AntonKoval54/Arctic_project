@@ -155,8 +155,7 @@ public class SessionManagerWindow extends JFrame {
 
         SessionData chosenSession = sessionDataService.loadSessionData(selectedSession);
 
-        SshService sshService = new SshService(chosenSession);
-        MainWindow window = new MainWindow(sshService);
+        MainWindow window = new MainWindow(chosenSession);
         window.setVisible(true);
 
         this.dispose();

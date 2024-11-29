@@ -3,11 +3,10 @@ package org.uroran.models;
 import lombok.*;
 
 @Data
+@Getter
 @AllArgsConstructor
 @NoArgsConstructor
 @Builder
-@Getter
-@Setter
 public class SessionData {
     private String name;
     private String host;
