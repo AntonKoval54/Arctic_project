@@ -8,35 +8,27 @@ import java.io.InputStream;
 import java.io.OutputStream;
 
 public class SshService {
-    private Session session;
+    private final SessionManager sessionManager;
     private ChannelShell channelShell;
     private InputStream inputStream;
     private OutputStream outputStream;
 
-    private final SessionData sessionData;
-
-    public SshService(SessionData sessionData) {
-        this.sessionData = sessionData;
+    public SshService(SessionManager sessionManager) {
+        this.sessionManager = sessionManager;
     }
 
-    /**
-     * Метод для создания сессии
-     */
     public void connect() throws JSchException, IOException {
-        JSch jsch = new JSch();
-
-        jsch.addIdentity(sessionData.getPathToKey(), sessionData.getPassPhrase());
-        session = jsch.getSession(sessionData.getUser(), sessionData.getHost(), sessionData.getPort());
-        session.setConfig("StrictHostKeyChecking", "no");
-
-        session.connect();
-
-        channelShell = (ChannelShell) session.openChannel("shell");
-
+        Channel channel = sessionManager.openChannel("shell");
+        channel.connect();
+        channelShell = (ChannelShell) channel;
         inputStream = channelShell.getInputStream();
         outputStream = channelShell.getOutputStream();
+    }
 
-        channelShell.connect();
+    public void disconnect() {
+        if (channelShell != null && channelShell.isConnected()) {
+            channelShell.disconnect();
+        }
     }
 
     /**
@@ -59,17 +51,5 @@ public class SshService {
         }
 
         return output.toString();
-    }
-
-    /**
-     * Метод для разъединения сессии
-     */
-    public void disconnect() {
-        if (channelShell != null && channelShell.isConnected()) {
-            channelShell.disconnect();
-        }
-        if (session != null && session.isConnected()) {
-            session.disconnect();
-        }
     }
 }

@@ -2,11 +2,11 @@ package org.uroran.gui;
 
 import org.uroran.models.SessionData;
 import org.uroran.service.SessionDataService;
-import org.uroran.service.SshService;
 
 import javax.swing.*;
 import java.awt.*;
 import java.io.File;
+import java.io.IOException;
 
 public class SessionManagerWindow extends JFrame {
     private static final String HOST = "umt.imm.uran.ru";
@@ -47,7 +47,7 @@ public class SessionManagerWindow extends JFrame {
         sessionNameField = new JTextField(20);
         usernameField = new JTextField(20);
         privateKeyField = new JTextField(20);
-        passphraseField = new JTextField(20);
+        passphraseField = new JPasswordField(20);
 
         JButton browseButton = new JButton("Обзор...");
         browseButton.addActionListener(e -> choosePrivateKeyFile());
@@ -132,8 +132,8 @@ public class SessionManagerWindow extends JFrame {
             sessionDataService.saveSessionData(newSession);
             refreshSessionList();
             JOptionPane.showMessageDialog(this, "Сессия успешно добавлена.", "Успех", JOptionPane.INFORMATION_MESSAGE);
-        } catch (IllegalArgumentException e) {
-            JOptionPane.showMessageDialog(this, e.getMessage(), "Ошибка", JOptionPane.ERROR_MESSAGE);
+        } catch (IllegalArgumentException | IOException e) {
+            JOptionPane.showMessageDialog(this, e.getMessage(), "Ошибка при добавлении", JOptionPane.ERROR_MESSAGE);
         }
 
         sessionNameField.setText("");
@@ -153,7 +153,13 @@ public class SessionManagerWindow extends JFrame {
             return;
         }
 
-        SessionData chosenSession = sessionDataService.loadSessionData(selectedSession);
+        SessionData chosenSession;
+        try {
+             chosenSession = sessionDataService.loadSessionData(selectedSession);
+        } catch (IOException | RuntimeException e) {
+            JOptionPane.showMessageDialog(this, e.getMessage(), "Ошибка при загрузке", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
 
         MainWindow window = new MainWindow(chosenSession);
         window.setVisible(true);
@@ -178,7 +184,13 @@ public class SessionManagerWindow extends JFrame {
                 JOptionPane.YES_NO_OPTION);
 
         if (confirm == JOptionPane.YES_OPTION) {
-            sessionDataService.deleteSession(selectedSession);
+            try {
+                sessionDataService.deleteSession(selectedSession);
+            } catch (IOException e) {
+                JOptionPane.showMessageDialog(this, e.getMessage(), "Ошибка при удалении", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
             refreshSessionList();
             JOptionPane.showMessageDialog(this, "Сессия успешно удалена.", "Успех", JOptionPane.INFORMATION_MESSAGE);
         }

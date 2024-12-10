@@ -43,52 +43,44 @@ public class SessionDataService {
     /**
      * Сохранение сессии.
      */
-    public void saveSessionData(SessionData session) {
+    public void saveSessionData(SessionData session) throws IOException {
         Path sessionFile = SESSIONS_DIRECTORY.resolve("session_" + session.getName() + ".yaml");
 
-        try {
-            yamlMapper.writeValue(sessionFile.toFile(), session);
+        yamlMapper.writeValue(sessionFile.toFile(), session);
 
-            List<String> sessionList = loadSessionDataList();
-            if (!sessionList.contains(session.getName())) {
-                sessionList.add(session.getName());
-                yamlMapper.writeValue(SESSION_LIST_FILE.toFile(), sessionList);
-            }
-        } catch (IOException ignored) {}
+        List<String> sessionList = loadSessionDataList();
+        if (!sessionList.contains(session.getName())) {
+            sessionList.add(session.getName());
+            yamlMapper.writeValue(SESSION_LIST_FILE.toFile(), sessionList);
+        }
     }
 
     /**
      * Получение сессии.
      */
-    public SessionData loadSessionData(String sessionName) {
+    public SessionData loadSessionData(String sessionName) throws IOException {
         Path sessionDataFile = SESSIONS_DIRECTORY.resolve("session_" + sessionName + ".yaml");
 
-        try {
-            if (Files.exists(sessionDataFile)) {
-                return yamlMapper.readValue(sessionDataFile.toFile(), SessionData.class);
-            }
-        } catch (IOException ignored) {}
-
-        throw new RuntimeException("Сессия " + sessionName + " не существует");
+        if (Files.exists(sessionDataFile)) {
+            return yamlMapper.readValue(sessionDataFile.toFile(), SessionData.class);
+        } else {
+            throw new RuntimeException("Такая сессия не существует");
+        }
     }
 
     /**
      * Удаление сессии.
      */
-    public void deleteSession(String sessionName) {
+    public void deleteSession(String sessionName) throws IOException {
         Path sessionFile = SESSIONS_DIRECTORY.resolve("session_" + sessionName + ".yaml");
 
-        try {
-            Files.deleteIfExists(sessionFile);
+        Files.deleteIfExists(sessionFile);
 
-            List<String> sessionList = loadSessionDataList();
+        List<String> sessionList = loadSessionDataList();
 
-            if (sessionList.contains(sessionName)) {
-                sessionList.remove(sessionName);
-                yamlMapper.writeValue(SESSION_LIST_FILE.toFile(), sessionList);
-            }
-        } catch (IOException ignored) {
-            throw new RuntimeException("Сессия " + sessionName + " не была найдена в списке сессий");
+        if (sessionList.contains(sessionName)) {
+            sessionList.remove(sessionName);
+            yamlMapper.writeValue(SESSION_LIST_FILE.toFile(), sessionList);
         }
     }
 
@@ -97,7 +89,8 @@ public class SessionDataService {
      */
     public List<String> loadSessionDataList() {
         try {
-            return yamlMapper.readValue(SESSION_LIST_FILE.toFile(), new TypeReference<>() {});
+            return yamlMapper.readValue(SESSION_LIST_FILE.toFile(), new TypeReference<>() {
+            });
         } catch (IOException e) {
             return new ArrayList<>();
         }

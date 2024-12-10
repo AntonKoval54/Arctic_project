@@ -14,5 +14,5 @@ import java.util.Map;
 @NoArgsConstructor
 public class TemperatureData {
     private int pointNumber;
-    private Map<LocalDate, Map<Double, Double>> data; // Month - Depth - Temperature
+    private Map<LocalDate, Map<Double, Double>> data; // Date - Depth - Temperature
 }
