@@ -5,6 +5,9 @@ import org.jetbrains.annotations.NotNull;
 
 import java.time.Month;
 
+/**
+ * Enum для сезонов года
+ */
 @Getter
 public enum Season {
     WINTER("Зима"),

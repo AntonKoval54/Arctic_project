@@ -1,26 +1,29 @@
 package org.uroran.service;
 
 import com.jcraft.jsch.*;
+import org.apache.poi.xssf.binary.XSSFBHyperlinksTable;
 import org.uroran.models.SessionData;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.List;
 
+/**
+ * Класс для работы по SSH
+ */
 public class SshService {
-    private final SessionManager sessionManager;
-    private ChannelShell channelShell;
+    private final ChannelShell channelShell;
     private InputStream inputStream;
     private OutputStream outputStream;
 
-    public SshService(SessionManager sessionManager) {
-        this.sessionManager = sessionManager;
+    public SshService(Channel channel) {
+        this.channelShell = (ChannelShell) channel;;
     }
 
     public void connect() throws JSchException, IOException {
-        Channel channel = sessionManager.openChannel("shell");
-        channel.connect();
-        channelShell = (ChannelShell) channel;
+        channelShell.connect();
         inputStream = channelShell.getInputStream();
         outputStream = channelShell.getOutputStream();
     }

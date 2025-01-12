@@ -1,22 +1,25 @@
 package org.uroran.util;
 
-import org.jfree.chart.JFreeChart;
 import org.uroran.models.Season;
 import org.uroran.models.TemperatureData;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStreamReader;
 import java.time.LocalDate;
 import java.time.Month;
 import java.util.stream.Collectors;
 
+/**
+ * Класс, содержащий полезные методы для работы с графиком температур.
+ */
 public final class ChartUtils {
-
     private ChartUtils() {
     }
 
+    /**
+     * Получить доступные месяцы за определенный год из температурных данных.
+     * @param data - данные.
+     * @param year - год
+     * @return список месяцев.
+     */
     public static Month[] getAvailableMonthsForYear(TemperatureData data, int year) {
         return data.getData().keySet().stream()
                 .filter(date -> date.getYear() == year)
@@ -24,6 +27,12 @@ public final class ChartUtils {
                 .toArray(java.time.Month[]::new);
     }
 
+    /**
+     * Получить доступные сезоны за определенный год из температурных данных.
+     * @param data - данные.
+     * @param year - год
+     * @return список сезонов.
+     */
     public static Season[] getAvailableSeasonsForYear(TemperatureData data, int year) {
         return data.getData().keySet().stream()
                 .filter(e -> (!e.getMonth().equals(Month.NOVEMBER) && e.getDayOfMonth() != 27) && e.getYear() == year)
@@ -33,49 +42,15 @@ public final class ChartUtils {
                 .keySet().toArray(Season[]::new);
     }
 
+    /**
+     * Получить доступные года.
+     * @param data - данные
+     * @return - список годов
+     */
     public static Integer[] getAvailableYears(TemperatureData data) {
         return data.getData().keySet().stream()
                 .map(LocalDate::getYear)
                 .distinct()
                 .toArray(Integer[]::new);
-    }
-
-    public static void exportChartAsPng(JFreeChart chart, File fileToSave) throws IOException {
-        // Добавляем расширение, если пользователь его не указал
-        if (!fileToSave.getName().toLowerCase().endsWith(".png")) {
-            fileToSave = new File(fileToSave.getAbsolutePath() + ".png");
-        }
-
-        org.jfree.chart.ChartUtils.saveChartAsPNG(fileToSave, chart, 800, 600);
-    }
-
-    public static void exportDataAsXlsx(String scriptPath, String inputFilePath) throws IOException, InterruptedException {
-        ProcessBuilder processBuilder = new ProcessBuilder(
-                "python", // Должен быть доступен в PATH
-                scriptPath,
-                inputFilePath
-        );
-
-        // Перенаправляем ошибки в стандартный поток вывода
-        processBuilder.redirectErrorStream(true);
-
-        // Запускаем процесс
-        Process process = processBuilder.start();
-
-        // Читаем вывод скрипта
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                System.out.println(line);
-            }
-        }
-
-        // Ожидаем завершения процесса
-        int exitCode = process.waitFor();
-        if (exitCode == 0) {
-            System.out.println("Python script executed successfully.");
-        } else {
-            System.err.println("Python script failed with exit code " + exitCode);
-        }
     }
 }

@@ -8,6 +8,9 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDate;
 import java.util.Map;
 
+/**
+ * Класс, содержащий температурные профили в определенной скважине
+ */
 @Data
 @Getter
 @AllArgsConstructor

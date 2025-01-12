@@ -6,18 +6,18 @@ import org.uroran.models.SftpEntry;
 import java.nio.file.Path;
 import java.util.*;
 
+/**
+ * Класс для работы по Sftp
+ */
 public class SftpService {
-    private final SessionManager sessionManager;
-    private ChannelSftp channelSftp;
+    private final ChannelSftp channelSftp;
 
-    public SftpService(SessionManager sessionManager) {
-        this.sessionManager = sessionManager;
+    public SftpService(Channel channel) {
+        this.channelSftp = (ChannelSftp) channel;
     }
 
     public void connect() throws JSchException, SftpException {
-        Channel channel = sessionManager.openChannel("sftp");
-        channel.connect();
-        channelSftp = (ChannelSftp) channel;
+        channelSftp.connect();
     }
 
     public void disconnect() {
@@ -56,6 +56,7 @@ public class SftpService {
 
             var fileAttrs = entry.getAttrs();
             String mTime = fileAttrs.getMtimeString();
+            
 
             if (fileAttrs.isDir()) {
                 files.add(new SftpEntry(filename, SftpEntry.EntryType.DIRECTORY, mTime));
@@ -66,9 +67,7 @@ public class SftpService {
             }
         }
 
-        Comparator<SftpEntry> comparator = Comparator.comparing(SftpEntry::getEntryType).thenComparing(SftpEntry::getName);
-
-        files.sort(comparator);
+        files.sort(Comparator.comparing(SftpEntry::getEntryType).thenComparing(SftpEntry::getName));
 
         return files;
     }

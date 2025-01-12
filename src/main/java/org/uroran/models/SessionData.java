@@ -2,6 +2,9 @@ package org.uroran.models;
 
 import lombok.*;
 
+/**
+ * Класс, содержащий данные для подключения сессии
+ */
 @Data
 @Getter
 @AllArgsConstructor

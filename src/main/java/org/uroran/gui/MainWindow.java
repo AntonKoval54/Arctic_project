@@ -1,80 +1,103 @@
 package org.uroran.gui;
 
+import com.jcraft.jsch.Channel;
 import com.jcraft.jsch.JSchException;
 import com.jcraft.jsch.SftpException;
 import org.uroran.models.SessionData;
 import org.uroran.models.SftpEntry;
 import org.uroran.models.TemperatureData;
-import org.uroran.service.SessionDataService;
-import org.uroran.service.SessionManager;
-import org.uroran.service.SftpService;
-import org.uroran.service.SshService;
+import org.uroran.service.*;
+import org.uroran.util.ColorUtils;
 import org.uroran.util.PointParser;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.text.BadLocationException;
-import javax.swing.text.SimpleAttributeSet;
-import javax.swing.text.StyleConstants;
+import javax.swing.text.DefaultCaret;
 import javax.swing.text.StyledDocument;
 import java.awt.*;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
-import java.awt.event.WindowAdapter;
-import java.awt.event.WindowEvent;
+import java.awt.event.*;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public class MainWindow extends JFrame {
-    private static final SftpEntry emptyEntry = new SftpEntry("..", SftpEntry.EntryType.DIRECTORY, "");
+    private static final SftpEntry EMPTY_ENTRY = new SftpEntry("..", SftpEntry.EntryType.DIRECTORY, "");
+    private static final String TEMP_FILES_DIR = "src/main/resources/tempfiles/";
+
+    private final List<String> currentFiles = new ArrayList<>();
+    private int currentFilesIndex = 0;
 
     private JTextField commandInputField;
     private StyledDocument document;
     private DefaultTableModel tableModel;
-    private boolean sync = true;
 
+    private final SessionManager sessionManager;
     private final SshService sshService;
     private final SftpService sftpService;
 
+    private final SettingsManager settingsManager;
+    private boolean sync;
+
+    private final TaskManager taskManager;
+
     public MainWindow(SessionData sessionData) {
-        SessionManager sessionManager = new SessionManager(sessionData);
+        sessionManager = new SessionManager(sessionData);
 
         try {
             sessionManager.connect();
         } catch (JSchException e) {
-            throw new RuntimeException("Cannot connect to session", e);
+            throw new RuntimeException("Не получилось создать сессию", e);
         }
-
-        this.sshService = new SshService(sessionManager);
-        this.sftpService = new SftpService(sessionManager);
 
         try {
+            Channel channelSsh = sessionManager.openChannel("shell");
+            Channel channelSftp = sessionManager.openChannel("sftp");
+
+            this.sshService = new SshService(channelSsh);
+            this.sftpService = new SftpService(channelSftp);
+
             sshService.connect();
             sftpService.connect();
-            Thread.sleep(1000);
-        } catch (IOException | JSchException | InterruptedException | SftpException e) {
-            throw new RuntimeException("Cannot open to channel", e);
+        } catch (IOException | JSchException | SftpException e) {
+            throw new RuntimeException("Не получилось открыть каналы", e);
         }
 
+        settingsManager = new SettingsManager();
+        applySettings();
+
+        taskManager = new TaskManager(sshService);
+        Runtime.getRuntime().addShutdownHook(new Thread(taskManager::shutdown));
+
+        initUI();
+    }
+
+    /**
+     * Метод для применения настроек, взятых из settingsManager.
+     */
+    private void applySettings() {
+        sync = Boolean.parseBoolean(settingsManager.getSetting("syncDirectories"));
+    }
+
+    /**
+     * Метод для инициализации всех главных панелей окна и самого окна.
+     */
+    private void initUI() {
         setTitle("СК 'УРАН'");
         setSize(1000, 600);
         setLocationRelativeTo(null);
 
-        setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
-                sshService.disconnect();
-                sftpService.disconnect();
-                dispose();
-                System.exit(0);
+                onClose();
             }
         });
 
@@ -84,16 +107,14 @@ public class MainWindow extends JFrame {
 
         setJMenuBar(createMenuBar());
 
-        // Основной разделитель (левая и правая часть)
+        // Разделитель
         JSplitPane mainSplitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT);
-        mainSplitPane.setDividerLocation(500);
+        mainSplitPane.setDividerLocation(550);
         container.add(mainSplitPane, BorderLayout.CENTER);
 
-        // SSH терминал
         JPanel sshPanel = createSshPanel();
         mainSplitPane.setLeftComponent(sshPanel);
 
-        // SFTP
         JPanel sftpPanel = createSftpPanel();
         mainSplitPane.setRightComponent(sftpPanel);
 
@@ -101,7 +122,18 @@ public class MainWindow extends JFrame {
     }
 
     /**
-     * Метод для создания SSH панели
+     * Метод, вызывающийся перед закрытием окна и закрывающий сессию и каналы.
+     */
+    private void onClose() {
+        sshService.disconnect();
+        sftpService.disconnect();
+        sessionManager.disconnect();
+    }
+
+    /**
+     * Метод для создания левой панели - панели для работы по SSH.
+     *
+     * @return панель
      */
     private JPanel createSshPanel() {
         JPanel sshPanel = new JPanel(new BorderLayout());
@@ -114,114 +146,178 @@ public class MainWindow extends JFrame {
         sshPanel.add(scrollPane, BorderLayout.CENTER);
 
         commandInputField = new JTextField();
-        commandInputField.addActionListener(e -> sendCommand());
+        commandInputField.addActionListener(_ -> sendCommand());
+        commandInputField.setFocusTraversalKeysEnabled(false);
+
+        // По нажатию на TAB пробегаемся по списку доступных в текущей директории файлов
+        commandInputField.addKeyListener(new KeyAdapter() {
+            @Override
+            public void keyPressed(KeyEvent e) {
+                if (e.getKeyCode() == KeyEvent.VK_TAB) {
+                    e.consume();
+                    if (!currentFiles.isEmpty()) {
+                        String currentText = commandInputField.getText();
+                        if (!currentText.contains(" ")) {
+                            currentText += "";
+                        }
+
+                        int lastIndexOfSpace = currentText.lastIndexOf(" ");
+                        String lastWord = currentText.substring(lastIndexOfSpace).trim();
+                        if (currentFiles.contains(lastWord)) {
+                            currentText = currentText.substring(0, lastIndexOfSpace + 1);
+                        }
+
+                        commandInputField.setText(currentText + currentFiles.get(currentFilesIndex));
+                        currentFilesIndex = (currentFilesIndex + 1) % currentFiles.size();
+                    }
+                }
+            }
+        });
         sshPanel.add(commandInputField, BorderLayout.SOUTH);
 
         return sshPanel;
     }
 
+    /**
+     * Метод для создания правой панели - панели для работы по SFTP.
+     *
+     * @return панель
+     */
     private JPanel createSftpPanel() {
-        {
-            JPanel sftpPanel = new JPanel(new BorderLayout());
+        JPanel sftpPanel = new JPanel(new BorderLayout());
 
-            // Создаем таблицу для отображения файлов
-            String[] columnNames = {"Тип", "Имя", "Время изменения"};
-            tableModel = new DefaultTableModel(columnNames, 0);
-            JTable fileTable = new JTable(tableModel) {
-                @Override
-                public boolean isCellEditable(int row, int column) {
-                    return false; // Отключаем редактирование
-                }
-            };
+        // Создаем таблицу для отображения файлов
+        String[] columnNames = {"Тип", "Имя", "Время изменения"};
+        tableModel = new DefaultTableModel(columnNames, 0);
+        JTable fileTable = new JTable(tableModel) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
 
-            // Добавляем прокрутку
-            JScrollPane scrollPane = new JScrollPane(fileTable);
-            sftpPanel.add(scrollPane, BorderLayout.CENTER);
+        fileTable.setShowGrid(false);
 
-            // Слушатель для обновления текущей директории
-            fileTable.addMouseListener(new MouseAdapter() {
-                @Override
-                public void mouseClicked(MouseEvent e) {
-                    int row = fileTable.rowAtPoint(e.getPoint());
-                    if (row < 0) return;
+        // Прокрутка
+        JScrollPane scrollPane = new JScrollPane(fileTable);
+        sftpPanel.add(scrollPane, BorderLayout.CENTER);
 
-                    String fileName = (String) tableModel.getValueAt(row, 1);
-                    String fileType = (String) tableModel.getValueAt(row, 0);
+        // Слушатель для обновления текущей директории по нажатию на ЛКМ или отображения PopUp меню при ПКМ
+        fileTable.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent event) {
+                int row = fileTable.rowAtPoint(event.getPoint());
+                if (row < 0) return;
 
-                    // ЛКМ: Переход в папку
-                    if (e.getClickCount() == 2
-                            && (fileType.equals(SftpEntry.EntryType.DIRECTORY.toString())
-                            || fileType.equals(SftpEntry.EntryType.LINK.toString()))
-                    ) {
-                        try {
-                            if (sync) {
-                                commandInputField.setText("cd " + fileName);
-                                sendCommand();
-                            } else {
-                                sftpService.changeCurrentRemoteDir(Path.of(fileName));
-                            }
+                String fileName = (String) tableModel.getValueAt(row, 1);
+                String fileType = (String) tableModel.getValueAt(row, 0);
 
-                            updateFileList(); // Обновление списка файлов
-                        } catch (SftpException ex) {
-                            JOptionPane.showMessageDialog(sftpPanel, "Не удалось открыть папку: " + ex.getMessage());
+                // ЛКМ
+                if (event.getClickCount() == 2
+                        && (fileType.equals(SftpEntry.EntryType.DIRECTORY.toString())
+                        || fileType.equals(SftpEntry.EntryType.LINK.toString()))
+                ) {
+                    try {
+                        if (sync) {
+                            commandInputField.setText("cd " + fileName);
+                            sendCommand();
+                        } else {
+                            sftpService.changeCurrentRemoteDir(Path.of(fileName));
                         }
-                    }
 
-                    // ПКМ: Показать контекстное меню
-                    if (SwingUtilities.isRightMouseButton(e)) {
-                        JPopupMenu contextMenu = createFileContextMenu(fileName);
-                        contextMenu.show(fileTable, e.getX(), e.getY());
+                        updateFileList();
+                    } catch (SftpException e) {
+                        JOptionPane.showMessageDialog(sftpPanel, "Не удалось открыть папку: " + e.getMessage());
                     }
                 }
-            });
 
-            fileTable.getColumnModel().getColumn(0).setCellRenderer(new DefaultTableCellRenderer() {
-                @Override
-                public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column) {
-                    JLabel label = new JLabel();
-                    label.setHorizontalAlignment(SwingConstants.CENTER);
-
-                    if (value.toString().equals(SftpEntry.EntryType.DIRECTORY.toString()) || value.toString().equals(SftpEntry.EntryType.LINK.toString())) {
-                        label.setIcon(UIManager.getIcon("FileView.directoryIcon"));
-                    } else {
-                        label.setIcon(UIManager.getIcon("FileView.fileIcon"));
-                    }
-
-                    if (isSelected) {
-                        label.setBackground(table.getSelectionBackground());
-                        label.setForeground(table.getSelectionForeground());
-                        label.setOpaque(true);
-                    }
-                    return label;
+                // ПКМ
+                if (SwingUtilities.isRightMouseButton(event)) {
+                    JPopupMenu contextMenu = createFileContextMenu(fileName);
+                    contextMenu.show(fileTable, event.getX(), event.getY());
                 }
-            });
+            }
+        });
 
-            // Инициализация списка файлов
-            updateFileList();
+        // Добавление стандартных иконок файлов и директорий.
+        fileTable.getColumnModel().getColumn(0).setCellRenderer(new DefaultTableCellRenderer() {
+            @Override
+            public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column) {
+                JLabel label = new JLabel();
+                label.setHorizontalAlignment(SwingConstants.CENTER);
 
-            return sftpPanel;
-        }
+                if (value.toString().equals(SftpEntry.EntryType.DIRECTORY.toString()) || value.toString().equals(SftpEntry.EntryType.LINK.toString())) {
+                    label.setIcon(UIManager.getIcon("FileView.directoryIcon"));
+                } else {
+                    label.setIcon(UIManager.getIcon("FileView.fileIcon"));
+                }
+
+                if (isSelected) {
+                    label.setBackground(table.getSelectionBackground());
+                    label.setForeground(table.getSelectionForeground());
+                    label.setOpaque(true);
+                }
+                return label;
+            }
+        });
+
+        updateFileList();
+
+        return sftpPanel;
     }
 
+    /**
+     * Метод для обновления списка файлов в таблице после перехода в новую директорию.
+     * Также записывает в currentFiles все названия для их возможной вставки при нажатии на TAB в терминале.
+     */
     private void updateFileList() {
+        currentFiles.clear();
+        currentFilesIndex = 0;
+
         tableModel.setRowCount(0);
         try {
-            tableModel.addRow(new Object[]{emptyEntry.getEntryType().name(), emptyEntry.getName(), emptyEntry.getMTime()});
+            tableModel.addRow(new Object[]{EMPTY_ENTRY.getEntryType().name(), EMPTY_ENTRY.getName(), EMPTY_ENTRY.getMTime()});
+
             List<SftpEntry> files = sftpService.listFiles();
             for (SftpEntry entry : files) {
                 tableModel.addRow(new Object[]{entry.getEntryType().name(), entry.getName(), entry.getMTime()});
+                currentFiles.add(entry.getName());
             }
         } catch (SftpException e) {
             JOptionPane.showMessageDialog(this, "Не удалось загрузить список файлов: " + e.getMessage());
         }
     }
 
+    /**
+     * Метод для создания PopUp меню при нажатии ПКМ по файлу для работы по SFTP или построения графика
+     *
+     * @param fileName - файл для работы
+     * @return возвращает меню
+     */
     private JPopupMenu createFileContextMenu(String fileName) {
         JPopupMenu contextMenu = new JPopupMenu();
 
+        //Кнопка "Загрузить"
+        JMenuItem uploadedItem = new JMenuItem("Загрузить");
+        uploadedItem.addActionListener(_ -> {
+            JFileChooser fileChooser = new JFileChooser();
+            int result = fileChooser.showSaveDialog(this);
+            if (result == JFileChooser.APPROVE_OPTION) {
+                Path localPath = fileChooser.getSelectedFile().toPath();
+                try {
+                    sftpService.uploadFile(localPath);
+                    updateFileList();
+                    JOptionPane.showMessageDialog(this, "Файл успешно загружен!");
+                } catch (SftpException e) {
+                    JOptionPane.showMessageDialog(this, "Ошибка при загрузку: " + e.getMessage());
+                }
+            }
+        });
+        contextMenu.add(uploadedItem);
+
         // Кнопка "Скачать"
         JMenuItem downloadItem = new JMenuItem("Скачать");
-        downloadItem.addActionListener(e -> {
+        downloadItem.addActionListener(_ -> {
             JFileChooser fileChooser = new JFileChooser();
             fileChooser.setSelectedFile(new File(fileName));
             int result = fileChooser.showSaveDialog(this);
@@ -230,8 +326,8 @@ public class MainWindow extends JFrame {
                 try {
                     sftpService.downloadFile(Path.of(fileName), localPath);
                     JOptionPane.showMessageDialog(this, "Файл успешно скачан!");
-                } catch (SftpException ex) {
-                    JOptionPane.showMessageDialog(this, "Ошибка при скачивании: " + ex.getMessage());
+                } catch (SftpException e) {
+                    JOptionPane.showMessageDialog(this, "Ошибка при скачивании: " + e.getMessage());
                 }
             }
         });
@@ -239,35 +335,45 @@ public class MainWindow extends JFrame {
 
         // Кнопка "Удалить"
         JMenuItem deleteItem = new JMenuItem("Удалить");
-        deleteItem.addActionListener(e -> {
+        deleteItem.addActionListener(_ -> {
             int confirm = JOptionPane.showConfirmDialog(this, "Вы уверены, что хотите удалить файл?", "Подтверждение удаления", JOptionPane.YES_NO_OPTION);
             if (confirm == JOptionPane.YES_OPTION) {
                 try {
                     sftpService.deleteFile(Path.of(fileName));
                     updateFileList();
                     JOptionPane.showMessageDialog(this, "Файл успешно удален!");
-                } catch (SftpException ex) {
-                    JOptionPane.showMessageDialog(this, "Ошибка при удалении: " + ex.getMessage());
+                } catch (SftpException e) {
+                    JOptionPane.showMessageDialog(this, "Ошибка при удалении: " + e.getMessage());
                 }
             }
         });
         contextMenu.add(deleteItem);
 
+        //Кнопка "Запустить продляющуюся задачу"
+        JMenuItem taskItem = new JMenuItem("Запустить продляющуюся задачу");
+        taskItem.addActionListener(_ -> {
+            TaskCreationWindow taskCreationWindow = new TaskCreationWindow(this, fileName, taskManager);
+            taskCreationWindow.setVisible(true);
+        });
+        contextMenu.add(taskItem);
+
         // Кнопка "График"
         JMenuItem graphItem = new JMenuItem("График");
-        graphItem.addActionListener(e -> {
+        graphItem.addActionListener(_ -> {
             try {
-                sftpService.downloadFile(Path.of(fileName), Path.of("src/main/resources/tempfiles"));
-            } catch (SftpException ex) {
-                JOptionPane.showMessageDialog(this, "Ошибка при открытии файла для построения графиков " + ex.getMessage());
+                sftpService.downloadFile(Path.of(fileName), Path.of(TEMP_FILES_DIR));
+            } catch (SftpException e) {
+                JOptionPane.showMessageDialog(this, "Ошибка при открытии файла для построения графиков " + e.getMessage());
+                return;
             }
 
             Map<LocalDate, Map<Double, Double>> parsedData;
             try {
-                Thread.sleep(2000);
-                parsedData = PointParser.parsePointFile("src/main/resources/tempfiles/" + fileName);
-            } catch (IOException | InterruptedException ex) {
-                throw new RuntimeException(ex);
+                parsedData = PointParser.parsePointFile(TEMP_FILES_DIR + fileName);
+                Files.deleteIfExists(Path.of(TEMP_FILES_DIR + fileName));
+            } catch (IOException e) {
+                JOptionPane.showMessageDialog(this, "Ошибка при открытии файла для построения графиков " + e.getMessage());
+                return;
             }
 
             TemperatureData data = new TemperatureData(15, parsedData);
@@ -284,125 +390,136 @@ public class MainWindow extends JFrame {
     }
 
     /**
-     * Создаем меню-бар с кнопками "Настройки", "SFTP" и "Закрыть сессию".
+     * Метод для создания меню-бара с кнопками "Настройки", "Справка" и "Закрыть сессию".
      */
     private JMenuBar createMenuBar() {
         JMenuBar menuBar = new JMenuBar();
 
-        // Меню "Настройки"
-        JMenu settingsMenu = new JMenu("Настройки");
-        JMenuItem settingsPlaceholder = new JMenuItem("Пусто");
-        settingsPlaceholder.setEnabled(false);
-        settingsMenu.add(settingsPlaceholder);
-        menuBar.add(settingsMenu);
+        Dimension buttonsDimension = new Dimension(100, 25);
+
+        // Кнопка "Настройки"
+        JButton settingsButton = new JButton("Настройки");
+        settingsButton.addActionListener(_ -> {
+            SettingsDialog settingsDialog = new SettingsDialog(this, settingsManager, this::applySettings);
+            settingsDialog.setVisible(true);
+        });
+        settingsButton.setPreferredSize(buttonsDimension);
+        menuBar.add(settingsButton);
+
+        // Кнопка "Задачи"
+        JButton tasksButton = new JButton("Задачи");
+        tasksButton.addActionListener(_ -> {
+            TaskManagerDialog taskManagerDialog = new TaskManagerDialog(this, taskManager);
+            taskManagerDialog.setVisible(true);
+        });
+        tasksButton.setPreferredSize(buttonsDimension);
+        menuBar.add(tasksButton);
+
+//        // Кнопка "Справка"
+//        JButton helpButton = new JButton("Справка");
+//        helpButton.addActionListener(_ -> {
+//        });
+//        menuBar.add(helpButton);
 
         // Кнопка "Закрыть сессию"
-        JMenuItem closeSessionItem = new JMenuItem("Закрыть сессию");
-        closeSessionItem.addActionListener(e -> {
-            sshService.disconnect();
+        JButton closeSessionButton = new JButton("Закрыть сессию");
+        closeSessionButton.addActionListener(_ -> {
+            onClose();
             new SessionManagerWindow(SessionDataService.getInstance()).setVisible(true);
             dispose();
         });
-        menuBar.add(closeSessionItem);
+        closeSessionButton.setPreferredSize(buttonsDimension);
+
+        menuBar.add(closeSessionButton);
 
         return menuBar;
     }
 
     /**
-     * Метод для отправки команды из GUI по SSH и вывода ответа
+     * Метод для отправки команды по SSH и вывода раскрашенного ответа
      */
     private void sendCommand() {
         String command = commandInputField.getText();
 
         String output;
         try {
+            // Проверка на перемещение - для синхронизации
             if (command.startsWith("cd") && sync) {
                 String path = command.split(" ")[1];
                 sftpService.changeCurrentRemoteDir(Path.of(path));
                 updateFileList();
             }
+
+            // Проверка на текстовый редактор
+            if (command.startsWith("nano") || command.startsWith("vim")) {
+                openTextEditor(command);
+                commandInputField.setText("");
+                return;
+            }
+
             output = sshService.sendCommand(command);
+            output = output.replaceFirst(command, "").trim();
+            output = output.replaceFirst("\\[0m", "");
         } catch (Exception ignored) {
-            output = "Failed";
+            output = "Failed\n";
         }
 
-        //Раскрашиваем input
-        appendColoredText(">>> " + command + "\n", Color.BLUE);
-        //раскрашиваем output
-        appendAnsiColoredText(output);
+        try {
+            //Раскрашиваем input и output
+            ColorUtils.appendColoredText(document, ">>> " + command + "\n", Color.BLUE);
+            ColorUtils.appendAnsiColoredText(document, output);
+        } catch (BadLocationException e) {
+            JOptionPane.showMessageDialog(this, "Ошибка при создании файла " + e.getMessage());
+        }
+
         commandInputField.setText("");
     }
 
     /**
-     * Метод для добавления текста с указанным цветом (GPT, криво)
+     * Метод, открывающий окно для редактирования файла при попытке открыть его через vim/nano
+     *
+     * @param command - команда для открытия файла через vim/nano
      */
-    private void appendColoredText(String text, Color color) {
-        SimpleAttributeSet attributes = new SimpleAttributeSet();
-        StyleConstants.setForeground(attributes, color);
+    private void openTextEditor(String command) {
+        String fileName = command.split(" ")[1];
+        String filePath = TEMP_FILES_DIR + fileName;
+
+        // Скачиваем файл для временного хранения
         try {
-            document.insertString(document.getLength(), text, attributes);
-        } catch (BadLocationException e) {
-            JOptionPane.showMessageDialog(this, e.getMessage(), "Ошибка при раскрашивании вводимого текста", JOptionPane.ERROR_MESSAGE);
-        }
-    }
-
-    /**
-     * Метод для парсинга и отображения текста с ANSI-кодами (GPT, вроде работает)
-     */
-    private void appendAnsiColoredText(String text) {
-        // Регулярное выражение для ANSI-кодов
-        Pattern ansiPattern = Pattern.compile("\u001B\\[(\\d+;?)*m");
-        Matcher matcher = ansiPattern.matcher(text);
-        int lastEnd = 0;
-
-        SimpleAttributeSet attributes = new SimpleAttributeSet();
-
-        while (matcher.find()) {
-            // Добавляем текст до ANSI-кода
-            if (matcher.start() > lastEnd) {
+            sftpService.downloadFile(Path.of(fileName), Path.of(filePath));
+        } catch (SftpException ex) {
+            if (ex.id == 2) { // No such file
                 try {
-                    document.insertString(document.getLength(), text.substring(lastEnd, matcher.start()), attributes);
-                } catch (BadLocationException e) {
-                    JOptionPane.showMessageDialog(this, e.getMessage(), "Ошибка при раскрашивании выводимого текста", JOptionPane.ERROR_MESSAGE);
+                    Files.createFile(Path.of(TEMP_FILES_DIR + fileName));
+                } catch (IOException e) {
+                    JOptionPane.showMessageDialog(this, "Ошибка при создании файла " + e.getMessage());
+                    return;
                 }
+            } else {
+                JOptionPane.showMessageDialog(this, "Ошибка при открытии файла для редактирования " + ex.getMessage());
+                return;
             }
-
-            // Обновляем стиль текста в зависимости от ANSI-кода
-            String ansiCode = matcher.group();
-            updateAttributesForAnsiCode(ansiCode, attributes);
-
-            lastEnd = matcher.end();
         }
 
-        // Добавляем оставшийся текст
-        if (lastEnd < text.length()) {
+        TextEditorDialog textEditorDialog = new TextEditorDialog(this, filePath, () -> {
+            Path path = Path.of(filePath);
+
             try {
-                document.insertString(document.getLength(), text.substring(lastEnd), attributes);
-            } catch (BadLocationException e) {
-                JOptionPane.showMessageDialog(this, e.getMessage(), "Ошибка при раскрашивании выводимого текста", JOptionPane.ERROR_MESSAGE);
+                sftpService.uploadFile(path);
+            } catch (SftpException e) {
+                JOptionPane.showMessageDialog(this, "Ошибка при загрузке файла обратно на сервер: " + e.getMessage());
             }
-        }
-    }
 
-    /**
-     * Метод для получения цвета по ANSI коду (GPT, криво)
-     */
-    private void updateAttributesForAnsiCode(String ansiCode, SimpleAttributeSet attributes) {
-        if (ansiCode.contains("31")) {
-            StyleConstants.setForeground(attributes, Color.RED);
-        } else if (ansiCode.contains("32")) {
-            StyleConstants.setForeground(attributes, Color.GREEN);
-        } else if (ansiCode.contains("33")) {
-            StyleConstants.setForeground(attributes, Color.YELLOW);
-        } else if (ansiCode.contains("34")) {
-            StyleConstants.setForeground(attributes, Color.BLUE);
-        } else if (ansiCode.contains("35")) {
-            StyleConstants.setForeground(attributes, Color.MAGENTA);
-        } else if (ansiCode.contains("36")) {
-            StyleConstants.setForeground(attributes, Color.CYAN);
-        } else if (ansiCode.contains("0")) {
-            StyleConstants.setForeground(attributes, Color.BLACK);
-        }
-    }
+            try {
+                Files.delete(path);
+            } catch (IOException e) {
+                JOptionPane.showMessageDialog(this, "Ошибка при удалении временного файла: " + e.getMessage());
+            }
 
+            updateFileList();
+        });
+
+        textEditorDialog.setVisible(true);
+
+    }
 }

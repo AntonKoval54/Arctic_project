@@ -7,6 +7,9 @@ import com.jcraft.jsch.Session;
 import lombok.Getter;
 import org.uroran.models.SessionData;
 
+/**
+ * Класс для создания сессии и каналов.
+ */
 public class SessionManager {
     @Getter
     private final SessionData sessionData;

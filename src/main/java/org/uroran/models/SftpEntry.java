@@ -2,6 +2,9 @@ package org.uroran.models;
 
 import lombok.*;
 
+/**
+ * Класс, содержащий характеристики файлов (SFTP протокол)
+ */
 @Data
 @Getter
 @AllArgsConstructor

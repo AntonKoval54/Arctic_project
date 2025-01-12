@@ -10,14 +10,12 @@ import org.uroran.models.TemperatureData;
 
 import java.time.LocalDate;
 import java.time.Month;
-import java.time.format.TextStyle;
-import java.util.Locale;
 import java.util.Map;
 
-
+/**
+ * Класс, содержащий методы для отрисовки панели с графиком
+ */
 public final class ChartDrawer {
-    private final static Locale locale = Locale.of("ru", "Russian Federation");
-
     private ChartDrawer() {
     }
 

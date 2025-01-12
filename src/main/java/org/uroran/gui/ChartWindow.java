@@ -3,6 +3,9 @@ package org.uroran.gui;
 import org.jfree.chart.ChartPanel;
 import org.uroran.models.Season;
 import org.uroran.models.TemperatureData;
+import org.uroran.service.exporters.ChartExporter;
+import org.uroran.service.exporters.ChartExporterFactory;
+import org.uroran.service.exporters.Format;
 import org.uroran.util.ChartDrawer;
 import org.uroran.util.ChartUtils;
 
@@ -14,8 +17,10 @@ import java.io.IOException;
 import java.time.LocalDate;
 import java.time.Month;
 
+/**
+ * Класс окна для просмотра температурных профилей.
+ */
 public class ChartWindow extends JFrame {
-    private final static String XLSX_SCRIPT_PATH = "script_txt_xslx.py";
     private final TemperatureData temperatureData;
     private ChartPanel currentChart;
     private final JPanel chartPanel;
@@ -36,6 +41,11 @@ public class ChartWindow extends JFrame {
         add(chartPanel, BorderLayout.CENTER);
     }
 
+    /**
+     * Метод для создания панели управления графиком
+     *
+     * @return - панель
+     */
     private JPanel createManagingPanel() {
         JPanel managingPanel = new JPanel(new BorderLayout());
         managingPanel.setPreferredSize(new Dimension(350, this.getHeight()));
@@ -50,6 +60,11 @@ public class ChartWindow extends JFrame {
         return managingPanel;
     }
 
+    /**
+     * Метод для создания верхней части панели управления (с выбором года, месяца, сезона)
+     *
+     * @return - панель
+     */
     private JPanel getTopManagingPanel() {
         JPanel topPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
 
@@ -59,9 +74,9 @@ public class ChartWindow extends JFrame {
         valueSelector.setEnabled(false);
         yearSelector.setEnabled(false);
 
-        chartTypes.addActionListener(e -> listenChartTypes(chartTypes, yearSelector, valueSelector));
-        yearSelector.addActionListener(e -> listenYearSelector(yearSelector, valueSelector, chartTypes));
-        valueSelector.addActionListener(e -> listenValueSelector(valueSelector, yearSelector, chartTypes));
+        chartTypes.addActionListener(_ -> listenChartTypes(chartTypes, yearSelector, valueSelector));
+        yearSelector.addActionListener(_ -> listenYearSelector(chartTypes, yearSelector, valueSelector));
+        valueSelector.addActionListener(_ -> listenValueSelector(chartTypes, yearSelector, valueSelector));
 
         Dimension comboBoxSize = new Dimension(150, 30);
 
@@ -71,6 +86,11 @@ public class ChartWindow extends JFrame {
         return topPanel;
     }
 
+    /**
+     * Метод для создания нижней части панели управления (кнопки экспорта)
+     *
+     * @return - панель
+     */
     private JPanel getBottomManagingPanel() {
         JPanel bottomPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 10));
         JButton exportImageButton = new JButton("Экспорт графика");
@@ -80,14 +100,22 @@ public class ChartWindow extends JFrame {
         exportImageButton.setPreferredSize(buttonSize);
         exportXlsxButton.setPreferredSize(buttonSize);
 
-        exportImageButton.addActionListener(e -> exportChartAsPng());
-        exportXlsxButton.addActionListener(e -> exportChartAsXLSX());
+        exportImageButton.addActionListener(_ -> exportChartAsPng());
+        exportXlsxButton.addActionListener(_ -> exportChartAsXLSX());
 
         bottomPanel.add(exportImageButton);
         bottomPanel.add(exportXlsxButton);
         return bottomPanel;
     }
 
+    /**
+     * Метод для создания универсальной панели с комбобоксом.
+     *
+     * @param comboBox          - комбобокс
+     * @param label             - надпись
+     * @param comboBoxDimension - размер
+     * @return - панель
+     */
     private JPanel createComboBoxPanel(JComboBox<String> comboBox, JLabel label, Dimension comboBoxDimension) {
         JPanel topPanelElement = new JPanel(new FlowLayout(FlowLayout.TRAILING));
 
@@ -98,6 +126,13 @@ public class ChartWindow extends JFrame {
         return topPanelElement;
     }
 
+    /**
+     * Слушатель для комбобокса по изменению типа графика
+     *
+     * @param chartTypes    - типы графиков
+     * @param yearSelector  - селектор годов
+     * @param valueSelector - селектор значений (месяцы, сезоны)
+     */
     private void listenChartTypes(JComboBox<String> chartTypes, JComboBox<String> yearSelector, JComboBox<String> valueSelector) {
         String selectedType = (String) chartTypes.getSelectedItem();
         yearSelector.removeAllItems();
@@ -117,8 +152,17 @@ public class ChartWindow extends JFrame {
         }
     }
 
-    private void listenYearSelector(JComboBox<String> yearSelector, JComboBox<String> valueSelector, JComboBox<String> chartTypes) {
-        if (!yearSelector.isEnabled()) return;
+    /**
+     * Слушатель для комбобокса по годам
+     *
+     * @param chartTypes    - типы графиков
+     * @param yearSelector  - селектор годов
+     * @param valueSelector - селектор значений (месяцы, сезоны)
+     */
+    private void listenYearSelector(JComboBox<String> chartTypes, JComboBox<String> yearSelector, JComboBox<String> valueSelector) {
+        if (!yearSelector.isEnabled()) {
+            return;
+        }
 
         String selectedYear = (String) yearSelector.getSelectedItem();
         String selectedType = (String) chartTypes.getSelectedItem();
@@ -147,8 +191,17 @@ public class ChartWindow extends JFrame {
         }
     }
 
-    private void listenValueSelector(JComboBox<String> valueSelector, JComboBox<String> yearSelector, JComboBox<String> chartTypes) {
-        if (!valueSelector.isEnabled()) return;
+    /**
+     * Слушатель для комбобокса по значениям (месяцы, сезоны)
+     *
+     * @param chartTypes    - типы графиков
+     * @param yearSelector  - селектор годов
+     * @param valueSelector - селектор значений (месяцы, сезоны)
+     */
+    private void listenValueSelector(JComboBox<String> chartTypes, JComboBox<String> yearSelector, JComboBox<String> valueSelector) {
+        if (!valueSelector.isEnabled()) {
+            return;
+        }
 
         String selectedType = (String) chartTypes.getSelectedItem();
         String selectedValue = (String) valueSelector.getSelectedItem();
@@ -183,6 +236,11 @@ public class ChartWindow extends JFrame {
         }
     }
 
+    /**
+     * Метод для обновления панели с графиком.
+     *
+     * @param newChartPanel - новая панель с графиком.
+     */
     private void updateChart(ChartPanel newChartPanel) {
         currentChart = newChartPanel;
 
@@ -192,41 +250,37 @@ public class ChartWindow extends JFrame {
         chartPanel.repaint();
     }
 
+    /**
+     * Метод для экспорта в виде картинки
+     */
     private void exportChartAsPng() {
-        JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("Сохранить график как изображение");
-        fileChooser.setFileFilter(new FileNameExtensionFilter("PNG Image", "png"));
-
-        int userSelection = fileChooser.showSaveDialog(null);
-        if (userSelection == JFileChooser.APPROVE_OPTION) {
-            File fileToSave = fileChooser.getSelectedFile();
-            try {
-                ChartUtils.exportChartAsPng(currentChart.getChart(), fileToSave);
-            } catch (IOException e) {
-                JOptionPane.showMessageDialog(null, "Ошибка сохранения графика: " + e.getMessage(), "Ошибка", JOptionPane.ERROR_MESSAGE);
-                return;
-            }
-
-            JOptionPane.showMessageDialog(null, "График успешно сохранён в " + fileToSave.getAbsolutePath());
-        }
+        exportChart(Format.PNG);
     }
 
     private void exportChartAsXLSX() {
+        exportChart(Format.XLSX);
+    }
+
+    private void exportChart(Format format) {
         JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("Сохранить данные как XLSX");
-        fileChooser.setFileFilter(new FileNameExtensionFilter("XLSX", "xlsx"));
+        fileChooser.setDialogTitle("Сохранить");
+        fileChooser.setFileFilter(new FileNameExtensionFilter(format.getName().toUpperCase() + " файл", format.getName()));
 
         int userSelection = fileChooser.showSaveDialog(null);
         if (userSelection == JFileChooser.APPROVE_OPTION) {
             File fileToSave = fileChooser.getSelectedFile();
-            try {
-                ChartUtils.exportDataAsXlsx(XLSX_SCRIPT_PATH, String.valueOf(fileToSave));
-            } catch (IOException | InterruptedException e) {
-                JOptionPane.showMessageDialog(null, "Ошибка сохранения данных: " + e.getMessage(), "Ошибка", JOptionPane.ERROR_MESSAGE);
-                return;
-            }
+            ChartExporter exporter = ChartExporterFactory.getExporter(format);
 
-            JOptionPane.showMessageDialog(null, "Данные успешно сохранены в " + fileToSave.getAbsolutePath());
+            try {
+                if (format == Format.PNG) {
+                    exporter.export(currentChart.getChart(), fileToSave);
+                } else if (format == Format.XLSX) {
+                    exporter.export(temperatureData, fileToSave);
+                }
+                JOptionPane.showMessageDialog(null, "Экспорт выполнен успешно: " + fileToSave.getAbsolutePath());
+            } catch (IOException e) {
+                JOptionPane.showMessageDialog(null, "Ошибка экспорта: " + e.getMessage(), "Ошибка", JOptionPane.ERROR_MESSAGE);
+            }
         }
     }
 }
