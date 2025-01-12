@@ -2,12 +2,14 @@ package org.uroran.models;
 
 import lombok.*;
 
+/**
+ * Класс, содержащий данные для подключения сессии
+ */
 @Data
+@Getter
 @AllArgsConstructor
 @NoArgsConstructor
 @Builder
-@Getter
-@Setter
 public class SessionData {
     private String name;
     private String host;

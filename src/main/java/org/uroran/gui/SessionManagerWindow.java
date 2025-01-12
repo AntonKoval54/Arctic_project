@@ -1,12 +1,13 @@
 package org.uroran.gui;
 
+import org.jfree.chart.entity.FlowEntity;
 import org.uroran.models.SessionData;
 import org.uroran.service.SessionDataService;
-import org.uroran.service.SshService;
 
 import javax.swing.*;
 import java.awt.*;
 import java.io.File;
+import java.io.IOException;
 
 public class SessionManagerWindow extends JFrame {
     private static final String HOST = "umt.imm.uran.ru";
@@ -26,56 +27,57 @@ public class SessionManagerWindow extends JFrame {
         //Создание окна выбора сессии
         setTitle("УРО РАН - Управление сессиями");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setSize(800, 500);
-        setLayout(new GridLayout(1, 2));
+        setLayout(new GridBagLayout());
 
         JPanel createSessionPanel = createSessionPanel();
         JPanel existingSessionsPanel = createExistingSessionPanel();
 
-
         add(createSessionPanel);
         add(existingSessionsPanel);
 
+        pack();
         setLocationRelativeTo(null);
     }
 
     public JPanel createSessionPanel() {
-        JPanel createSessionPanel = new JPanel();
-        createSessionPanel.setLayout(new GridLayout(6, 1, 5, 5));
+        JPanel createSessionPanel = new JPanel(new BorderLayout());
         createSessionPanel.setBorder(BorderFactory.createTitledBorder("Создать новую сессию"));
 
-        sessionNameField = new JTextField(20);
-        usernameField = new JTextField(20);
-        privateKeyField = new JTextField(20);
-        passphraseField = new JTextField(20);
+        JPanel fieldsPanel = new JPanel(new GridLayout(6, 1, 0, 10));
+
+        sessionNameField = new JTextField(3);
+        usernameField = new JTextField(3);
+        privateKeyField = new JTextField(3);
+        passphraseField = new JPasswordField(3);
 
         JButton browseButton = new JButton("Обзор...");
-        browseButton.addActionListener(e -> choosePrivateKeyFile());
+        browseButton.addActionListener(_ -> choosePrivateKeyFile());
 
         JPanel privateKeyPanel = new JPanel(new BorderLayout());
         privateKeyPanel.add(privateKeyField, BorderLayout.CENTER);
         privateKeyPanel.add(browseButton, BorderLayout.EAST);
 
-        createSessionPanel.add(new JLabel("Имя сессии:"));
-        createSessionPanel.add(sessionNameField);
-        createSessionPanel.add(new JLabel("Имя пользователя:"));
-        createSessionPanel.add(usernameField);
-        createSessionPanel.add(new JLabel("Приватный ключ (OpenSSH):"));
-        createSessionPanel.add(privateKeyPanel);
-        createSessionPanel.add(new JLabel("Контрольное слово:"));
-        createSessionPanel.add(passphraseField);
+        fieldsPanel.add(new JLabel("Имя сессии:  "));
+        fieldsPanel.add(sessionNameField);
+        fieldsPanel.add(new JLabel("Имя пользователя:  "));
+        fieldsPanel.add(usernameField);
+        fieldsPanel.add(new JLabel("Приватный ключ (OpenSSH):  "));
+        fieldsPanel.add(privateKeyPanel);
+        fieldsPanel.add(new JLabel("Контрольное слово:  "));
+        fieldsPanel.add(passphraseField);
+        createSessionPanel.add(fieldsPanel, BorderLayout.PAGE_START);
 
+        JPanel buttonPanel = new JPanel(new BorderLayout());
         JButton addButton = new JButton("Добавить");
-        addButton.addActionListener(e -> addNewSession());
-
-        createSessionPanel.add(addButton);
+        addButton.addActionListener(_ -> addNewSession());
+        buttonPanel.add(addButton);
+        createSessionPanel.add(buttonPanel, BorderLayout.PAGE_END);
 
         return createSessionPanel;
     }
 
     public JPanel createExistingSessionPanel() {
-        JPanel existingSessionsPanel = new JPanel();
-        existingSessionsPanel.setLayout(new BorderLayout());
+        JPanel existingSessionsPanel = new JPanel(new BorderLayout(0, 50));
         existingSessionsPanel.setBorder(BorderFactory.createTitledBorder("Сохраненные сессии"));
 
         String[] savedSessions = sessionDataService.loadSessionDataList().toArray(new String[0]);
@@ -83,12 +85,12 @@ public class SessionManagerWindow extends JFrame {
         JScrollPane sessionScrollPane = new JScrollPane(sessionList);
 
         JButton connectButton = new JButton("Подключить");
-        connectButton.addActionListener(e -> connectToSelectedSession());
+        connectButton.addActionListener(_ -> connectToSelectedSession());
 
         JButton deleteButton = new JButton("Удалить");
-        deleteButton.addActionListener(e -> deleteSession());
+        deleteButton.addActionListener(_ -> deleteSession());
 
-        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
         buttonPanel.add(connectButton);
         buttonPanel.add(deleteButton);
 
@@ -132,8 +134,8 @@ public class SessionManagerWindow extends JFrame {
             sessionDataService.saveSessionData(newSession);
             refreshSessionList();
             JOptionPane.showMessageDialog(this, "Сессия успешно добавлена.", "Успех", JOptionPane.INFORMATION_MESSAGE);
-        } catch (IllegalArgumentException e) {
-            JOptionPane.showMessageDialog(this, e.getMessage(), "Ошибка", JOptionPane.ERROR_MESSAGE);
+        } catch (IllegalArgumentException | IOException e) {
+            JOptionPane.showMessageDialog(this, e.getMessage(), "Ошибка при добавлении", JOptionPane.ERROR_MESSAGE);
         }
 
         sessionNameField.setText("");
@@ -153,11 +155,15 @@ public class SessionManagerWindow extends JFrame {
             return;
         }
 
-        SessionData chosenSession = sessionDataService.loadSessionData(selectedSession);
+        SessionData chosenSession;
+        try {
+             chosenSession = sessionDataService.loadSessionData(selectedSession);
+        } catch (IOException | RuntimeException e) {
+            JOptionPane.showMessageDialog(this, e.getMessage(), "Ошибка при загрузке", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
 
-        SshService sshService = new SshService(chosenSession);
-        MainWindow window = new MainWindow(sshService);
-        window.setVisible(true);
+        SwingUtilities.invokeLater(() -> new MainWindow(chosenSession).setVisible(true));
 
         this.dispose();
     }
@@ -179,7 +185,13 @@ public class SessionManagerWindow extends JFrame {
                 JOptionPane.YES_NO_OPTION);
 
         if (confirm == JOptionPane.YES_OPTION) {
-            sessionDataService.deleteSession(selectedSession);
+            try {
+                sessionDataService.deleteSession(selectedSession);
+            } catch (IOException e) {
+                JOptionPane.showMessageDialog(this, e.getMessage(), "Ошибка при удалении", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
             refreshSessionList();
             JOptionPane.showMessageDialog(this, "Сессия успешно удалена.", "Успех", JOptionPane.INFORMATION_MESSAGE);
         }
